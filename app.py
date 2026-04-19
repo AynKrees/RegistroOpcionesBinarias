@@ -2,8 +2,25 @@ import streamlit as st
 import pandas as pd
 from database import Trade, Strategy, engine
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy import create_engine
+from sqlalchemy.ext.declarative import declarative_base
 import datetime
 import os
+
+if "supabase" in st.secrets:
+    # Usa Supabase si estamos en la nube
+    DATABASE_URL = st.secrets["supabase"]["URL"]
+else:
+    # Usa SQLite local si estamos programando en la PC
+    DATABASE_URL = "sqlite:///trading.db"
+
+# Si el link empieza con postgres:// (viejo) SQLAlchemy pide que sea postgresql://
+if DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+
+engine = create_engine(DATABASE_URL)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+Base = declarative_base()
 
 Session = sessionmaker(bind=engine)
 session = Session()
