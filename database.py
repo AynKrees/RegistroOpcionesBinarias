@@ -1,30 +1,48 @@
 import streamlit as st
 from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, ForeignKey, CheckConstraint
 from sqlalchemy.orm import declarative_base, sessionmaker
+from urllib.parse import quote_plus
 import datetime
 
-# 1. Configuración Híbrida (PC o Nube)
+# 1. DEFINIR BASE (Esto faltaba en tu mensaje)
+Base = declarative_base()
+
+# 2. Configuración Híbrida
 if "supabase" in st.secrets:
-    # Si estamos en la nube, usamos el link de Supabase que guardaste en Secrets
-    DATABASE_URL = st.secrets["supabase"]["URL"]
+    raw_url = st.secrets["supabase"]["URL"]
+    
+    # Si la URL tiene el #, lo limpiamos automáticamente
+    if "#" in raw_url and "%23" not in raw_url:
+        # Extraemos la contraseña 'melquisv11#' y la limpiamos
+        # Tu URL tiene este formato: postgresql://usuario:clave@host...
+        try:
+            # Separamos por el @ para obtener la parte de la clave
+            protocol_user_pass, host_part = raw_url.split("@", 1)
+            protocol_user, password = protocol_user_pass.rsplit(":", 1)
+            
+            safe_password = quote_plus(password)
+            DATABASE_URL = f"{protocol_user}:{safe_password}@{host_part}"
+        except Exception:
+            # Si falla la limpieza, usamos la URL tal cual
+            DATABASE_URL = raw_url
+    else:
+        DATABASE_URL = raw_url
 else:
-    # Si estás en tu PC, sigue usando el archivo local
     DATABASE_URL = 'sqlite:///trading.db'
 
-# Fix para SQLAlchemy y Postgres
+# Fix de compatibilidad para SQLAlchemy 2.0+
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
 engine = create_engine(DATABASE_URL)
-Base = declarative_base()
 
-# 2. Tabla de Estrategias
+# 3. Tabla de Estrategias
 class Strategy(Base):
     __tablename__ = 'strategies'
     id = Column(Integer, primary_key=True)
     name = Column(String, nullable=False, unique=True)
 
-# 3. Tabla de Trades
+# 4. Tabla de Trades
 class Trade(Base):
     __tablename__ = 'trades'
     id = Column(Integer, primary_key=True)
@@ -44,11 +62,8 @@ class Trade(Base):
         CheckConstraint("result IN ('WIN', 'LOSS')"),
     )
 
-# 4. LA LÍNEA MÁGICA (Aquí es donde va)
-# Esto le dice a Supabase: "Si no ves estas tablas, créalas ahora mismo"
+# 5. CREAR TABLAS AUTOMÁTICAMENTE
 Base.metadata.create_all(engine)
 
-# Configuración de la sesión para usar en app.py
+# Configuración de la sesión
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
-print("✅ ¡Estructura de base de datos verificada/creada con éxito!")
