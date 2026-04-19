@@ -6,16 +6,18 @@ import datetime
 # 1. Definición de la Base
 Base = declarative_base()
 
-# 2. Configuración de Conexión (Híbrida)
-if "supabase" in st.secrets:
-    # Usamos el link de los Secrets de Streamlit
+# 2. Configuración de Conexión (Híbrida y Segura)
+try:
+    # Intentamos forzar la lectura del link de los Secrets de Streamlit
     DATABASE_URL = st.secrets["supabase"]["URL"]
     
     # Fix de compatibilidad: SQLAlchemy requiere 'postgresql://'
     if DATABASE_URL.startswith("postgres://"):
         DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
-else:
-    # Conexión local para cuando programas en tu PC
+        
+except Exception as e:
+    # Si falla por cualquier motivo, muestra el error visual en la app y usa SQLite local
+    st.error("⚠️ Aviso: No se detectaron los Secrets de Supabase. Guardando en base de datos local (SQLite).")
     DATABASE_URL = 'sqlite:///trading.db'
 
 # 3. Creación del Motor
