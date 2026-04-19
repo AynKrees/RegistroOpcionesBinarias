@@ -1,18 +1,30 @@
+import streamlit as st
 from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, ForeignKey, CheckConstraint
 from sqlalchemy.orm import declarative_base, sessionmaker
 import datetime
 
-# 1. Configuración: Creamos el archivo de la base de datos
-engine = create_engine('sqlite:///trading.db')
+# 1. Configuración Híbrida (PC o Nube)
+if "supabase" in st.secrets:
+    # Si estamos en la nube, usamos el link de Supabase que guardaste en Secrets
+    DATABASE_URL = st.secrets["supabase"]["URL"]
+else:
+    # Si estás en tu PC, sigue usando el archivo local
+    DATABASE_URL = 'sqlite:///trading.db'
+
+# Fix para SQLAlchemy y Postgres
+if DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+
+engine = create_engine(DATABASE_URL)
 Base = declarative_base()
 
-# 2. Tabla de Estrategias (para no repetir texto)
+# 2. Tabla de Estrategias
 class Strategy(Base):
     __tablename__ = 'strategies'
     id = Column(Integer, primary_key=True)
     name = Column(String, nullable=False, unique=True)
 
-# 3. Tabla de Trades (donde registrarás tus operaciones)
+# 3. Tabla de Trades
 class Trade(Base):
     __tablename__ = 'trades'
     id = Column(Integer, primary_key=True)
@@ -32,6 +44,11 @@ class Trade(Base):
         CheckConstraint("result IN ('WIN', 'LOSS')"),
     )
 
-# 4. Crear las tablas físicamente
+# 4. LA LÍNEA MÁGICA (Aquí es donde va)
+# Esto le dice a Supabase: "Si no ves estas tablas, créalas ahora mismo"
 Base.metadata.create_all(engine)
-print("✅ ¡Base de datos y tablas creadas con éxito!")
+
+# Configuración de la sesión para usar en app.py
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+print("✅ ¡Estructura de base de datos verificada/creada con éxito!")
