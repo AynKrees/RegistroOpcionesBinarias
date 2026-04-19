@@ -1,29 +1,12 @@
 import streamlit as st
 import pandas as pd
-from database import Trade, Strategy, engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy import create_engine
-from sqlalchemy.ext.declarative import declarative_base
+# Importamos la configuración lista desde database.py
+from database import Trade, Strategy, engine, SessionLocal
 import datetime
 import os
 
-if "supabase" in st.secrets:
-    # Usa Supabase si estamos en la nube
-    DATABASE_URL = st.secrets["supabase"]["URL"]
-else:
-    # Usa SQLite local si estamos programando en la PC
-    DATABASE_URL = "sqlite:///trading.db"
-
-# Si el link empieza con postgres:// (viejo) SQLAlchemy pide que sea postgresql://
-if DATABASE_URL.startswith("postgres://"):
-    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
-
-engine = create_engine(DATABASE_URL)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-Base = declarative_base()
-
-Session = sessionmaker(bind=engine)
-session = Session()
+# Usamos la sesión que ya viene configurada
+session = SessionLocal()
 
 if not os.path.exists("screenshots"):
     os.makedirs("screenshots")
@@ -62,16 +45,11 @@ with st.form("registro_trade", clear_on_submit=True):
     
     with col1:
         fecha = st.date_input("Fecha del Trade", datetime.date.today())
-        
-        # SELECTORES NUMÉRICOS INDEPENDIENTES
-        # REEMPLAZA EL BLOQUE DE LAS COLUMNAS DE HORA POR ESTE:
         st.write("Selecciona la Hora (24h):")
         sub_col_h, sub_col_m = st.columns(2)
         with sub_col_h:
-            # max_value=23 impide que el número suba de ahí
             hora_sel = st.number_input("HH", min_value=0, max_value=23, value=datetime.datetime.now().hour, step=1, help="Máximo 23")
         with sub_col_m:
-            # max_value=59 impide que el número suba de ahí
             minuto_sel = st.number_input("MM", min_value=0, max_value=59, value=datetime.datetime.now().minute, step=1, help="Máximo 59")
             
         asset = st.text_input("Activo (Ej: EURUSD)")
@@ -88,7 +66,6 @@ with st.form("registro_trade", clear_on_submit=True):
         uploaded_file = st.file_uploader("📸 Captura", type=['png', 'jpg', 'jpeg'])
     
     if st.form_submit_button("Guardar Operación"):
-        # COMBINAR LOS NUEVOS VALORES DE HORA Y MINUTO
         hora_final = datetime.time(hour=hora_sel, minute=minuto_sel)
         fecha_final = datetime.datetime.combine(fecha, hora_final)
         
@@ -117,20 +94,15 @@ st.markdown("---")
 st.subheader("📈 Historial de Operaciones")
 
 if all_trades:
-    # 1. Traemos los datos crudos
     df = pd.read_sql("SELECT * FROM trades", engine)
     
-    # 2. Procesamos Fecha y Hora
     df['executed_at'] = pd.to_datetime(df['executed_at'])
     df['Fecha'] = df['executed_at'].dt.strftime('%Y-%m-%d')
     df['Hora'] = df['executed_at'].dt.strftime('%H:%M')
     
-# Procesamos la nota para la vista rápida de la tabla
     df['Nota_Tabla'] = df['notes'].apply(lambda x: (x[:30] + '...') if x and len(x) > 30 else x)
     df['Captura'] = df['screenshot_path'].apply(lambda x: "✅ Sí" if pd.notnull(x) and x != "" else "❌ No")
     
-    # --- LA SOLUCIÓN AL ERROR ---
-    # Seleccionamos explícitamente solo las columnas que queremos mostrar y en el orden exacto
     columnas_finales = {
         "id": "ID",
         "Fecha": "Fecha",
@@ -144,10 +116,8 @@ if all_trades:
         "Captura": "Captura"
     }
     
-    # Filtramos el dataframe para que solo tenga esas columnas
     df_mostrar = df[list(columnas_finales.keys())].rename(columns=columnas_finales)
     
-    # 5. Aplicar colores y formato
     def color_resultado(val):
         color = '#2ecc71' if val == "WIN" else '#e74c3c'
         return f'background-color: {color}; color: white; font-weight: bold'
@@ -159,14 +129,10 @@ if all_trades:
                  
     st.dataframe(df_styled, width="stretch", hide_index=True)
 
-# --- BOTÓN DE DESCARGA CON RUTAS REALES ---
     st.markdown(" ") 
     
-    # 1. Creamos una copia del DataFrame original para el Excel
-    # Así no afectamos lo que se ve en la pantalla
     df_excel = df.copy()
     
-    # 2. Seleccionamos las columnas para el Excel incluyendo la ruta real
     columnas_excel = {
         "id": "ID",
         "Fecha": "Fecha",
@@ -176,14 +142,11 @@ if all_trades:
         "result": "Resultado",
         "stake_amount": "Inversión ($)",
         "profit_amount": "Profit ($)",
-        "notes": "Notas Completas", # Aquí va la nota sin recortar
-        "screenshot_path": "Ruta de Captura" # Aquí va la ruta real para el Excel
+        "notes": "Notas Completas",
+        "screenshot_path": "Ruta de Captura"
     }
     
-    # Filtrar y renombrar
     df_final_excel = df_excel[list(columnas_excel.keys())].rename(columns=columnas_excel)
-    
-    # 3. Convertir a CSV
     csv_data = df_final_excel.to_csv(index=False).encode('utf-8')
     
     st.download_button(
@@ -193,7 +156,6 @@ if all_trades:
         mime="text/csv",
     )
 
-# --- VISOR DE CAPTURAS AJUSTADO ---
     st.markdown("---")
     st.subheader("🖼️ Visor de Capturas")
     
@@ -217,7 +179,6 @@ if all_trades:
             if st.button("Cerrar"):
                 st.session_state.mostrar_img = False
         
-        # EL COMENTARIO AHORA APARECE AQUÍ ABAJO
         if st.session_state.mostrar_img:
             trade_data = session.query(Trade).filter_by(id=st.session_state.id_actual).first()
             if trade_data:
@@ -239,4 +200,7 @@ if all_trades:
             elif trade_img and trade_img.screenshot_path:
                 st.error("Imagen no encontrada en disco.")
 else: 
-    st.info("No hay operaciones registradas aún.")              
+    st.info("No hay operaciones registradas aún.")
+
+# Cerramos la sesión al final
+session.close()
