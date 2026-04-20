@@ -6,22 +6,28 @@ import datetime
 # 1. Definición de la Base
 Base = declarative_base()
 
-# 2. Configuración de Conexión (Híbrida y Segura)
+# 2. Configuración de Conexión (Blindada para Supabase)
 try:
-    # Intentamos forzar la lectura del link de los Secrets de Streamlit
+    # Leemos de st.secrets["database"]["URL"]
     DATABASE_URL = st.secrets["database"]["URL"]
     
-    # Fix de compatibilidad: SQLAlchemy requiere 'postgresql://'
+    # Limpiamos parámetros extras que pueden dar error en la nube
+    if "?" in DATABASE_URL:
+        DATABASE_URL = DATABASE_URL.split("?")[0]
+    
+    # Forzamos el driver postgresql+psycopg2 para asegurar la conexión
     if DATABASE_URL.startswith("postgres://"):
-        DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+        DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+psycopg2://", 1)
+    elif DATABASE_URL.startswith("postgresql://"):
+        DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+psycopg2://", 1)
         
 except Exception as e:
-    # Si falla por cualquier motivo, muestra el error visual en la app y usa SQLite local
-    st.error("⚠️ Aviso: No se detectaron los Secrets de Supabase. Guardando en base de datos local (SQLite).")
+    # Si no hay secrets, usa SQLite para que la app no crashee al abrir
     DATABASE_URL = 'sqlite:///trading.db'
 
 # 3. Creación del Motor
-engine = create_engine(DATABASE_URL)
+# Usamos pool_pre_ping para evitar que la conexión se caiga por inactividad
+engine = create_engine(DATABASE_URL, pool_pre_ping=True)
 
 # 4. Modelos de Tablas
 class Strategy(Base):
@@ -49,7 +55,6 @@ class Trade(Base):
     )
 
 # 5. Inicialización Automática
-# Esto crea las tablas en Supabase si no existen
 Base.metadata.create_all(engine)
 
 # Configuración de sesión
