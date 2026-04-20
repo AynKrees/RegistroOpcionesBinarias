@@ -8,7 +8,7 @@ import os
 # Usamos la sesión que ya viene configurada
 session = SessionLocal()
 
-# Creamos la carpeta local si no existe
+# Creamos la carpeta local si no existe para las capturas temporales
 if not os.path.exists("screenshots"):
     os.makedirs("screenshots")
 
@@ -33,7 +33,7 @@ id_borrar = st.sidebar.number_input("ID a eliminar", min_value=1, step=1)
 if st.sidebar.button("Eliminar"):
     trade_a_borrar = session.query(Trade).filter_by(id=id_borrar).first()
     if trade_a_borrar:
-        # Borrar archivo físico si existe
+        # Borrar archivo físico si existe localmente
         if trade_a_borrar.screenshot_path and os.path.exists(trade_a_borrar.screenshot_path):
             os.remove(trade_a_borrar.screenshot_path)
         session.delete(trade_a_borrar)
@@ -80,11 +80,13 @@ with st.form("registro_trade", clear_on_submit=True):
             with open(img_path, "wb") as f:
                 f.write(uploaded_file.getbuffer())
         
+        # Lógica de Estrategia: Buscar en Supabase o crear si no existe
         strat = session.query(Strategy).filter_by(name=strategy).first() or Strategy(name=strategy)
         if not strat.id:
             session.add(strat)
-            session.flush()
+            session.flush() # Obtener el ID antes del commit final
         
+        # Creación del objeto Trade para la tabla en Supabase
         nuevo = Trade(
             executed_at=fecha_final, 
             asset=asset, direction=direction, result=result,
@@ -92,6 +94,8 @@ with st.form("registro_trade", clear_on_submit=True):
             profit_amount=round(profit, 2), strategy_id=strat.id,
             notes=notes, screenshot_path=img_path 
         )
+        
+        # GUARDADO DEFINITIVO EN SUPABASE
         session.add(nuevo)
         session.commit()
         st.rerun()
@@ -101,11 +105,13 @@ st.markdown("---")
 st.subheader("📈 Historial de Operaciones")
 
 if all_trades:
+    # Leemos directamente de la base de datos de Supabase
     df = pd.read_sql("SELECT * FROM trades", engine)
     df['executed_at'] = pd.to_datetime(df['executed_at'])
     df['Fecha'] = df['executed_at'].dt.strftime('%Y-%m-%d')
     df['Hora'] = df['executed_at'].dt.strftime('%H:%M')
     
+    # Marcamos si tiene captura en el servidor local
     df['Captura'] = df['screenshot_path'].apply(lambda x: "✅ Sí" if x and os.path.exists(x) else "❌ No")
     
     columnas_finales = {
@@ -120,7 +126,7 @@ if all_trades:
         color = '#2ecc71' if val == "WIN" else '#e74c3c'
         return f'background-color: {color}; color: white; font-weight: bold'
 
-    st.dataframe(df_mostrar.sort_values(by="ID", ascending=False).style.map(color_resultado, subset=['Resultado']), hide_index=True)
+    st.dataframe(df_mostrar.sort_values(by="ID", ascending=False).style.map(color_resultado, subset=['Resultado']), hide_index=True, use_container_width=True)
 
     # --- VISOR DE CAPTURAS MANTENIDO ---
     st.markdown("---")
@@ -143,6 +149,7 @@ if all_trades:
             st.session_state.mostrar_img = False
         
         if st.session_state.mostrar_img:
+            # Consultamos la nota del trade específico en Supabase
             t_data = session.query(Trade).filter_by(id=st.session_state.id_actual).first()
             if t_data and t_data.notes:
                 st.info(f"Notas: {t_data.notes}")
@@ -153,9 +160,9 @@ if all_trades:
             if t_img and t_img.screenshot_path and os.path.exists(t_img.screenshot_path):
                 st.image(t_img.screenshot_path, caption=f"Trade #{t_img.id}")
             else:
-                st.warning("No hay imagen disponible para este ID.")
+                st.warning("No hay imagen disponible localmente para este ID.")
 
 else: 
-    st.info("No hay operaciones registradas aún.")
+    st.info("No hay operaciones registradas aún en Supabase.")
 
 session.close()
