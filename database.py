@@ -9,7 +9,7 @@ Base = declarative_base()
 # 2. Configuración de Conexión (Híbrida y Segura)
 try:
     # Intentamos forzar la lectura del link de los Secrets de Streamlit
-    DATABASE_URL = st.secrets["supabase"]["URL"]
+    DATABASE_URL = st.secrets["database"]["URL"]
     
     # Fix de compatibilidad: SQLAlchemy requiere 'postgresql://'
     if DATABASE_URL.startswith("postgres://"):
