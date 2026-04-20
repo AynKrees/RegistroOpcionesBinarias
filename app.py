@@ -2,8 +2,15 @@ import streamlit as st
 import pandas as pd
 # Importamos la configuración lista desde database.py
 from database import Trade, Strategy, engine, SessionLocal
+from supabase import create_client # <-- Nueva importación
 import datetime
 import os
+
+# --- CONFIGURACIÓN SUPABASE STORAGE ---
+# Usamos las credenciales de tus st.secrets
+SUPABASE_URL = st.secrets["supabase"]["URL"]
+SUPABASE_KEY = st.secrets["supabase"]["ANON_KEY"]
+supabase_client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # Usamos la sesión que ya viene configurada
 session = SessionLocal()
@@ -32,8 +39,7 @@ id_borrar = st.sidebar.number_input("ID a eliminar", min_value=1, step=1)
 if st.sidebar.button("Eliminar"):
     trade_a_borrar = session.query(Trade).filter_by(id=id_borrar).first()
     if trade_a_borrar:
-        if trade_a_borrar.screenshot_path and os.path.exists(trade_a_borrar.screenshot_path):
-            os.remove(trade_a_borrar.screenshot_path)
+        # Nota: Aquí podrías agregar lógica para borrar del storage también si quieres
         session.delete(trade_a_borrar)
         session.commit()
         st.rerun()
@@ -71,10 +77,21 @@ with st.form("registro_trade", clear_on_submit=True):
         
         profit = stake * (payout / 100) if result == "WIN" else -stake
         
-        img_path = ""
+        # --- NUEVA LÓGICA DE SUBIDA A SUPABASE ---
+        img_url = ""
         if uploaded_file:
-            img_path = f"screenshots/trade_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
-            with open(img_path, "wb") as f: f.write(uploaded_file.getbuffer())
+            # Creamos nombre único para evitar duplicados
+            file_name = f"trade_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+            file_bytes = uploaded_file.getvalue()
+            
+            # Subimos al bucket que creaste
+            supabase_client.storage.from_("trading-captures").upload(
+                path=file_name,
+                file=file_bytes,
+                file_options={"content-type": uploaded_file.type}
+            )
+            # Obtenemos la URL pública para guardarla en la base de datos
+            img_url = supabase_client.storage.from_("trading-captures").get_public_url(file_name)
         
         strat = session.query(Strategy).filter_by(name=strategy).first() or Strategy(name=strategy)
         
@@ -83,7 +100,7 @@ with st.form("registro_trade", clear_on_submit=True):
             asset=asset, direction=direction, result=result,
             stake_amount=stake, payout_percent=payout,
             profit_amount=round(profit, 2), strategy_id=strat.id,
-            notes=notes, screenshot_path=img_path
+            notes=notes, screenshot_path=img_url # Guardamos el LINK de internet
         )
         session.add(nuevo)
         session.commit()
@@ -101,7 +118,8 @@ if all_trades:
     df['Hora'] = df['executed_at'].dt.strftime('%H:%M')
     
     df['Nota_Tabla'] = df['notes'].apply(lambda x: (x[:30] + '...') if x and len(x) > 30 else x)
-    df['Captura'] = df['screenshot_path'].apply(lambda x: "✅ Sí" if pd.notnull(x) and x != "" else "❌ No")
+    # Cambiamos la lógica: si empieza con http, es que hay captura en la nube
+    df['Captura'] = df['screenshot_path'].apply(lambda x: "✅ Sí" if x and x.startswith("http") else "❌ No")
     
     columnas_finales = {
         "id": "ID",
@@ -123,10 +141,10 @@ if all_trades:
         return f'background-color: {color}; color: white; font-weight: bold'
 
     df_styled = (df_mostrar.sort_values(by="ID", ascending=False)
-                 .style
-                 .format({"Inversión ($)": "{:.2f}", "Profit ($)": "{:.2f}"})
-                 .map(color_resultado, subset=['Resultado']))
-                 
+                  .style
+                  .format({"Inversión ($)": "{:.2f}", "Profit ($)": "{:.2f}"})
+                  .map(color_resultado, subset=['Resultado']))
+                  
     st.dataframe(df_styled, width="stretch", hide_index=True)
 
     st.markdown(" ") 
@@ -143,7 +161,7 @@ if all_trades:
         "stake_amount": "Inversión ($)",
         "profit_amount": "Profit ($)",
         "notes": "Notas Completas",
-        "screenshot_path": "Ruta de Captura"
+        "screenshot_path": "URL de Captura"
     }
     
     df_final_excel = df_excel[list(columnas_excel.keys())].rename(columns=columnas_excel)
@@ -174,33 +192,4 @@ if all_trades:
         with col_btns1:
             if st.button("Mostrar"):
                 st.session_state.mostrar_img = True
-                st.session_state.id_actual = visor_id
-        with col_btns2:
-            if st.button("Cerrar"):
-                st.session_state.mostrar_img = False
-        
-        if st.session_state.mostrar_img:
-            trade_data = session.query(Trade).filter_by(id=st.session_state.id_actual).first()
-            if trade_data:
-                st.markdown("##### 📝 Comentarios")
-                if trade_data.notes:
-                    with st.container(border=True):
-                        st.write(trade_data.notes)
-                else:
-                    st.caption("Sin notas.")
-
-    with col_visor2:
-        if st.session_state.mostrar_img:
-            trade_img = session.query(Trade).filter_by(id=st.session_state.id_actual).first()
-            
-            if trade_img and trade_img.screenshot_path and os.path.exists(trade_img.screenshot_path):
-                st.image(trade_img.screenshot_path, 
-                         caption=f"Operación #{st.session_state.id_actual} - {trade_img.asset}", 
-                         width="content")
-            elif trade_img and trade_img.screenshot_path:
-                st.error("Imagen no encontrada en disco.")
-else: 
-    st.info("No hay operaciones registradas aún.")
-
-# Cerramos la sesión al final
-session.close()
+                st.session_state
